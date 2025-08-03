@@ -3,3 +3,5 @@
 
 .vs/
 *.csproj.user
+
+web-service-compiled/

@@ -4,13 +4,22 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Pine.Core;
+using Pine.Core.PopularEncodings;
+using Pine.Elm.Platform;
 using Pine.Platform.WebService;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
 public class Program
 {
+    const string webServiceCompiledFileName =
+        "compiled-modules";
+
+    static readonly IReadOnlyList<string> s_webServiceCompiledDirectoryPathRelative =
+        ["web-service-compiled"];
+
     public static async System.Threading.Tasks.Task Main(string[] args)
     {
         var webServiceDict =
@@ -21,6 +30,52 @@ public class Program
 
         var webServiceComposition =
             PineValueComposition.SortedTreeFromSetOfBlobsWithStringPath(webServiceDict);
+
+        var isCommandJustBuild =
+            Array.Exists(args, arg => arg.Equals("just-build", StringComparison.OrdinalIgnoreCase));
+
+        if (isCommandJustBuild)
+        {
+            Console.WriteLine("Skipping web service startup due to 'just-build' command.");
+
+            var webServiceCompiled =
+                WebServiceInterface.CompiledModulesFromSourceFilesAndEntryFileName(
+                    webServiceComposition,
+                    entryFileName: ["src", "Backend", "Main.elm"]);
+
+            var webServiceCompiledDirectoryPath =
+                Path.Combine([Environment.CurrentDirectory, .. s_webServiceCompiledDirectoryPathRelative]);
+
+            var webServiceCompiledFilePath =
+                Path.Combine(webServiceCompiledDirectoryPath, webServiceCompiledFileName);
+
+            Console.WriteLine($"Writing compiled web service to: {webServiceCompiledFilePath}");
+
+            Directory.CreateDirectory(webServiceCompiledDirectoryPath);
+
+            using var fileStream =
+                new FileStream(
+                    Path.Combine(webServiceCompiledFilePath),
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None);
+
+            PineValueBinaryEncoding.Encode(fileStream, webServiceCompiled);
+
+            return;
+        }
+
+        var prebuildWebServiceDict =
+            DotNetAssembly.LoadDirectoryFilesFromManifestEmbeddedFileProviderAsDictionary(
+                directoryPath: s_webServiceCompiledDirectoryPathRelative,
+                assembly: typeof(Program).Assembly)
+            .Extract(err => throw new Exception($"Failed to load web service compiled: {err}"));
+
+        var webServiceCompiledModulesEncoded =
+            prebuildWebServiceDict[[webServiceCompiledFileName]];
+
+        var webServiceCompiledModules =
+            PineValueBinaryEncoding.DecodeRoot(webServiceCompiledModulesEncoded);
 
         var root =
             Environment.GetEnvironmentVariable("HOME")
@@ -56,8 +111,8 @@ public class Program
         var cancellationTokenSource = new CancellationTokenSource();
 
         var webService =
-            new StaticAppSnapshottingViaJson(
-                webServiceAppSourceFiles: webServiceComposition,
+            StaticAppSnapshottingState.Create(
+                webServiceCompiledModules: webServiceCompiledModules,
                 fileStore: fileStore,
                 logMessage: LogMessageFromWebService,
                 cancellationToken: cancellationTokenSource.Token);

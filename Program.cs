@@ -70,10 +70,6 @@ public class Program
             logging.AddDebug();
         });
 
-        appBuilder.WebHost
-            .UseKestrel()
-            .UseUrls("http://localhost:5000");
-
         var app = appBuilder.Build();
 
         // app.MapGet("/", () => "Hello World!");
